@@ -1,73 +1,29 @@
-# 🐧 LinuxWatch — Standalone Linux Mint Surveillance & Control System
+# LinuxWatch device health MVP
 
-A 100% independent, full-stack monitoring and remote control system tailored specifically for **Linux Mint** and desktop Linux environments. Designed to operate separately from your Android tracking projects.
+A small, visible device-health dashboard and a foreground Linux agent. It measures CPU, memory and disk percentages. It does not collect app usage, URLs, browser history, screenshots, webcam media or keystrokes, and exposes no remote commands or device controls.
 
----
+## Server
 
-## 📁 Folder Structure (`/Users/universeboss/Desktop/LinuxWatch`)
+Requires Node 22 or newer; there are no third-party runtime packages. Copy `.env.example` to `.env`, set a unique dashboard passphrase (12–256 characters) and a separate random agent token (32–256 characters), then run `npm start`. `openssl rand -hex 32` can generate a token. Defaults bind to `127.0.0.1:3000`.
 
-```
-LinuxWatch/
-├── package.json          # Node.js server dependencies
-├── server.js             # Standalone cloud backend & SQLite database (linuxwatch.db)
-├── public/               # AMOLED Glassmorphism Web Dashboard
-│   ├── index.html        # Desktop-oriented layout
-│   ├── style.css         # Pitch-black AMOLED styling
-│   └── app.js            # Client-side WebSocket & API logic
-└── agent/                # Linux Mint Python 3 Daemon
-    ├── agent.py          # Background surveillance daemon (psutil, websockets, mss)
-    ├── requirements.txt  # Python dependencies
-    └── install.sh        # 1-click systemd background installer
+For remote access, configure a TLS reverse proxy, set `HOST=0.0.0.0` and `PUBLIC_ORIGIN=https://your-host`. Network-facing cleartext configuration is rejected. HTTP must remain private behind the proxy. Add trusted-edge request limits for an exposed deployment. The dashboard uses an HttpOnly, SameSite=Strict cookie with an eight-hour session; HTTPS origins add Secure. Login has a five-attempt/IP/five-minute limit. Restarting the server revokes sessions.
+
+## Foreground agent
+
+Requires Python 3 on Linux with `/proc`; no third-party packages. Review what is sent with the device owner. Set `LINUXWATCH_AGENT_TOKEN` to the server token in your shell, then run:
+
+```sh
+python3 agent.py --server https://your-host --device-id study-laptop --consent
 ```
 
----
+Choose a non-personal device label. The agent prints a disclosure, runs in the foreground and stops with Ctrl+C. No installer, background service or boot task is created. It sends only the device label, three percentages and observation time, every 15 seconds. `--disk` chooses the filesystem measured without transmitting its path. It rejects cleartext remote servers and redirects, so credentials cannot be forwarded to another host. HTTP loopback is available for local testing.
 
-## 🚀 1. Running / Deploying the Server (`server.js`)
+CPU uses deltas of `/proc/stat`; memory uses MemAvailable; disk shows the fraction unavailable to an ordinary user, including reserved blocks. Reports received more than 60 seconds ago are marked stale. Keep device clocks accurate: observations more than ten minutes from server time are rejected.
 
-### Run Locally on your computer:
-```bash
-cd /Users/universeboss/Desktop/LinuxWatch
-npm install
-npm start
-```
-Your dashboard will be live at: **http://localhost:3005**
-* **Security PIN**: `2026`
-* **Agent Secret Key**: `linuxwatch_secret_key_2026`
+## Storage and limits
 
-### Deploy to Render (Cloud):
-1. Create a new Web Service on Render pointing to your `LinuxWatch` repository folder.
-2. Build Command: `npm install`
-3. Start Command: `node server.js`
-4. Set environment variables:
-   * `LW_PIN` = `2026`
-   * `AGENT_KEY` = `linuxwatch_secret_key_2026`
+This MVP keeps only the latest report for up to 64 devices in memory. It does not provide history, durable storage, alert delivery or per-device enrollment. Reports older than 24 hours are hidden and removed during ingestion. A restart clears reports. A shared agent credential is appropriate only for a small trusted group of your devices; rotate it and restart the server to revoke access. Per-device tokens and durable metric history can be added after the health MVP is validated.
 
----
+## Validation
 
-## 🐧 2. Installing the Agent on Linux Mint
-
-Copy the `agent/` folder to the target Linux Mint computer, or run directly from terminal:
-
-```bash
-cd agent
-./install.sh
-```
-
-### What `install.sh` Does:
-1. Installs system requirements (`python3-pip`, `python3-psutil`, `xdotool`).
-2. Copies `agent.py` to a hidden folder: `~/.local/share/.linuxwatch/agent.py`.
-3. Creates and starts an auto-restarting background service (`systemd --user`): `~/.config/systemd/user/linuxwatch.service`.
-4. The agent instantly connects over WebSocket (`/ws/agent`) and reports live system metrics every few seconds.
-
----
-
-## ⭐ Key Desktop Features
-
-* **Live CPU, RAM, & Disk Usage**: Real-time progress bars and percentage tracking.
-* **Active Window & Process Inspection**: Shows the exact window title (`Mozilla Firefox - Wikipedia`) and process name (`cinnamon`) currently in focus.
-* **Top Running Processes Table**: Lists memory usage (MB) and CPU (%) of desktop programs with a remote **✕ Kill Process** button!
-* **Linux Browser History**: Automatically copies and reads visited URLs across Google Chrome, Chromium, Brave, and Firefox SQLite databases without locking them (`last_reported_urls`), complete with **⬇️ Export CSV**.
-* **Stealth Desktop Screenshots**: Uses `mss` cross-platform screen capture to silently take multi-monitor desktop screenshots.
-* **Persistent Screen Lock (`lock`)**: Executes `cinnamon-screensaver-command -l` / `loginctl lock-session` every second to prevent unauthorized desktop access until unlocked (`unlock`).
-* **Send Desktop Alert Popup (`alert`)**: Triggers `notify-send -u critical` right on the Linux Mint screen.
-# linuxwatch
+Run `npm run check`. Node tests exercise the real local HTTP flow, authorization, report ingestion, safe cookies, logout, rate limits and payload validation. Python fixture tests exercise Linux counters and endpoint restrictions. Tests use synthetic metrics: no real device agent is started. CI runs these checks on Linux. Live reverse proxy/TLS and a consenting Linux device still need an end-to-end smoke test before deployment.
